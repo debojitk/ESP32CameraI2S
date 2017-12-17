@@ -44,10 +44,11 @@ OV7670 *camera;
 //WiFiMulti wifiMulti;
 //WiFiServer server(80);
 
-uint8_t MAC[6];
-uint8_t MAC_BROADCAST[6];
+//uint8_t MAC[6];
+//uint8_t MAC_BROADCAST[6];
 
 unsigned char bmpHeader[BMP::headerSize];
+WiFiUDP udp;
 
 //void serve()
 //{
@@ -107,17 +108,23 @@ void setup()
 {
   Serial.begin(115200);
 
-  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  esp_wifi_init(&cfg);
-  esp_wifi_set_mode(WIFI_MODE_NULL);
+  WiFi.disconnect(true);
+
+  // Force data rate
   wifi_internal_rate_t rate;
   rate.fix_rate = RATE_MCS4_SP;
   esp_wifi_internal_set_rate(100, 1, 4, &rate);
-  esp_wifi_start();
-  esp_wifi_set_ps(WIFI_PS_NONE);
 
-  WiFi.macAddress(MAC);
-  memset(MAC_BROADCAST, 0xFF, 6);
+  WiFi.softAP("Test");
+
+  // Change beacon_interval because 100ms is crazy!
+  wifi_config_t conf;
+  esp_wifi_get_config(WIFI_IF_AP, &conf);
+  conf.ap.beacon_interval = 5000;
+  esp_wifi_set_config(WIFI_IF_AP, &conf);
+
+  //WiFi.macAddress(MAC);
+ // memset(MAC_BROADCAST, 0xFF, 6);
 
 //  wifiMulti.addAP(ssid1, password1);
 //  //wifiMulti.addAP(ssid2, password2);
@@ -137,69 +144,51 @@ void setup()
   //server.begin();
 }
 
-//void displayY8(unsigned char * frame, int xres, int yres)
-//{
-//  tft.setAddrWindow(0, 0, yres - 1, xres - 1);
-//  int i = 0;
-//  for(int x = 0; x < xres; x++)
-//    for(int y = 0; y < yres; y++)
-//    {
-//      i = y * xres + x;
-//      unsigned char c = frame[i];
-//      unsigned short r = c >> 3;
-//      unsigned short g = c >> 2;
-//      unsigned short b = c >> 3;
-//      tft.pushColor(r << 11 | g << 5 | b);
-//    }  
-//}
-
 void displayRGB565(unsigned char * frame, int xres, int yres)
 {
-  uint8_t data[1500];
-  WiFiHeader* pkt = (WiFiHeader*)data;
-  pkt->frame_control.type = WIFI_TYPE_DATA;
-  pkt->frame_control.subtype = 0;
-  pkt->frame_control.to_ds = 1;
-  memcpy(pkt->address_1, MAC_BROADCAST, 6);
-  memcpy(pkt->address_2, MAC, 6);
-  memcpy(pkt->address_3, MAC, 6);
-//  pkt->address_1 = MAC_BROADCAST;
-//  pkt->address_2 = MAC;
-//  pkt->address_3 = MAC;
-
-  int size = xres * yres * 2;
-  int data_size = sizeof(data) - sizeof(WiFiHeader);
-
-  for (int i = 0; i < size; i += data_size) {
-    if (size - i < data_size) {
-      data_size = size - i;
-    }
-    memcpy(data + sizeof(WiFiHeader), frame + i, data_size);
-    int result = esp_wifi_80211_tx(WIFI_IF_AP, data, sizeof(WiFiHeader) + data_size, true);
-    switch (result) {
-      case ERR_OK: Serial.println("ERR_OK"); break;
-      case ERR_MEM: Serial.println("ERR_MEM"); break;
-      case ERR_IF: Serial.println("ERR_IF"); break;
-      case ERR_ARG: Serial.println("ERR_ARG"); break;
-      default: Serial.println(result);
-    }
-    
-  }
-//  tft.setAddrWindow(0, 0, yres - 1, xres - 1);
-//  int i = 0;
-//  for(int x = 0; x < xres; x++)
-//    for(int y = 0; y < yres; y++)
-//    {
-//      i = (y * xres + x) << 1;
-//      tft.pushColor((frame[i] | (frame[i+1] << 8)));
-//    }  
+  udp.beginPacket("255.255.255.255", 3333);
+  udp.write(frame, xres * yres * 2);
+  udp.endPacket();
+//  static uint16_t sequence = 0;
+//  uint8_t data[1500];
+//  WiFiHeader* pkt = (WiFiHeader*)data;
+//  memset(data, 0, sizeof(WiFiHeader));
+//  pkt->frame_control.type = WIFI_TYPE_DATA;
+//  pkt->frame_control.subtype = 0;
+//  pkt->frame_control.to_ds = 1;
+//  memcpy(pkt->address_1, MAC_BROADCAST, 6);
+//  memcpy(pkt->address_2, MAC_BROADCAST, 6);
+//  memcpy(pkt->address_3, MAC, 6);
+//  pkt->sequence.sequence_number = sequence++;
+//
+//  int size = xres * yres * 2;
+//  int data_size = sizeof(data) - sizeof(WiFiHeader);
+//  int fragment = 0;
+//
+//  for (int i = 0; i < size; i += data_size) {
+//    if (size - i < data_size) {
+//      data_size = size - i;
+//    }
+//    memcpy(data + sizeof(WiFiHeader), frame + i, data_size);
+//    pkt->sequence.fragment_number = fragment++;
+//    int result = esp_wifi_80211_tx(WIFI_IF_AP, data, sizeof(WiFiHeader) + data_size, false);
+//    switch (result) {
+//      case ERR_OK: Serial.println("ERR_OK"); break;
+//      case ERR_MEM: Serial.println("ERR_MEM"); break;
+//      case ERR_IF: Serial.println("ERR_IF"); break;
+//      case ERR_ARG: Serial.println("ERR_ARG"); break;
+//      default: Serial.println(result);
+//    }
+//    
+//  }
   
 }
 
 void loop()
 {
+  Serial.println("loop");
   camera->oneFrame();
   //serve();
   displayRGB565(camera->frame, camera->xres, camera->yres);
-  delay(500);
+  //delay(500);
 }
