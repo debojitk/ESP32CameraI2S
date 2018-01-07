@@ -67,7 +67,7 @@ void I2SCamera::i2sStop()
 
 void I2SCamera::i2sRun()
 {
-    DEBUG_PRINTLN("I2S Run");
+    //DEBUG_PRINTLN("I2S Run");
     while (gpio_get_level(vSyncPin) == 0);
     while (gpio_get_level(vSyncPin) != 0);
 
@@ -76,8 +76,8 @@ void I2SCamera::i2sRun()
     blocksReceived = 0;
     dmaBufferActive = 0;
     framePointer = 0;
-    DEBUG_PRINT("Sample count ");
-    DEBUG_PRINTLN(dmaBuffer[0]->sampleCount());
+    //DEBUG_PRINT("Sample count ");
+    //DEBUG_PRINTLN(dmaBuffer[0]->sampleCount());
     I2S0.rx_eof_num = dmaBuffer[0]->sampleCount();
     I2S0.in_link.addr = (uint32_t)&(dmaBuffer[0]->descriptor);
     I2S0.in_link.start = 1;
