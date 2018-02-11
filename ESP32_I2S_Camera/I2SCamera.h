@@ -15,12 +15,15 @@
 #include "rom/lldesc.h"
 #include "XClk.h"
 #include "DMABuffer.h"
+#include "FreeRTOS.h"
+#include "freertos/ringbuf.h"
+
 
 class I2SCamera
 {
   public:
   static gpio_num_t vSyncPin;
-  static int blocksReceived;
+  static int linesReceived;
   static int framesReceived;
   static int xres;
   static int yres;
@@ -29,7 +32,8 @@ class I2SCamera
   static int dmaBufferCount;
   static int dmaBufferActive;
   static DMABuffer **dmaBuffer;
-  static unsigned char* frame;
+  //static unsigned char* frame;
+  static RingbufHandle_t frameBuffer;
   static int framePointer;
   static int frameBytes;
   static volatile bool stopSignal;

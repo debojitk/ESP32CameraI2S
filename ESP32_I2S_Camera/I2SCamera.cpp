@@ -5,8 +5,9 @@
 
 #include "I2SCamera.h"
 #include "Log.h"
+#include <lwip/sockets.h>
 
-int I2SCamera::blocksReceived = 0;
+int I2SCamera::linesReceived = 0;
 int I2SCamera::framesReceived = 0;
 int I2SCamera::xres = 640;
 int I2SCamera::yres = 480;
@@ -16,35 +17,80 @@ intr_handle_t I2SCamera::vSyncInterruptHandle = 0;
 int I2SCamera::dmaBufferCount = 0;
 int I2SCamera::dmaBufferActive = 0;
 DMABuffer **I2SCamera::dmaBuffer = 0;
-unsigned char* I2SCamera::frame = 0;
+//unsigned char* I2SCamera::frame = 0;
+RingbufHandle_t I2SCamera::frameBuffer;
 int I2SCamera::framePointer = 0;
 int I2SCamera::frameBytes = 0;
 volatile bool I2SCamera::stopSignal = false;
 
-void IRAM_ATTR I2SCamera::i2sInterrupt(void* arg)
-{
+extern int udp_server;
+extern struct sockaddr_in destination;
+
+void IRAM_ATTR I2SCamera::i2sInterrupt(void* arg) {
     I2S0.int_clr.val = I2S0.int_raw.val;
-    blocksReceived++;
+    linesReceived++;
     unsigned char* buf = dmaBuffer[dmaBufferActive]->buffer;
     dmaBufferActive = (dmaBufferActive + 1) % dmaBufferCount;
+    BaseType_t xHigherPriorityTaskWoken;
+    unsigned char tmp[2];
     if(framePointer < frameBytes)
-      for(int i = 0; i < xres * 4; i += 4)
-      {
-        frame[framePointer++] = buf[i + 2];
-        frame[framePointer++] = buf[i];
+      for(int i = 0; i < xres * 4; i += 4) {
+        tmp[0] = buf[i + 2];
+        tmp[1] = buf[i];
+        xRingbufferSendFromISR(frameBuffer, tmp, 2, &xHigherPriorityTaskWoken);
       }
-    if (blocksReceived == yres)
-    {
+//    static VideoPacket pkt;
+//    static int packetPointer = 0;
+//    int i = 0;
+//    if(framePointer < frameBytes) {
+//      while (i < xres * 4) {
+//        Serial.print("starting ");
+//        Serial.println(i);
+//        for(int i = 0; i < xres * 4; i += 4) {
+//          pkt.data[packetPointer++] = buf[i + 2];
+//          pkt.data[packetPointer++] = buf[i];
+//        }
+//        if (packetPointer == MAX_DATA_SIZE) {
+//          Serial.println("Send pkt");
+//          Serial.println(packetPointer);
+//          pkt.header.offset = framePointer;
+//          pkt.header.frame = framesReceived;
+//          pkt.header.len = frameBytes;
+//          int sent = sendto(
+//            udp_server,
+//            &pkt, sizeof(VideoPacket),
+//            0,
+//            (struct sockaddr*) &destination, sizeof(destination)
+//          );
+//
+//          framePointer += packetPointer;
+//          packetPointer = 0;
+//        }
+//      }
+//    }
+    if (linesReceived == yres) {
+//      // Dangling data
+//      if (packetPointer != 0) {
+//        Serial.println("Dangle");
+//        Serial.println(packetPointer);
+//        pkt.header.offset = framePointer;
+//        pkt.header.frame = framesReceived;
+//        pkt.header.len = frameBytes;
+//        int sent = sendto(
+//          udp_server,
+//          &pkt, sizeof(PacketHeader) + packetPointer,
+//          0,
+//          (struct sockaddr*) &destination, sizeof(destination)
+//        );
+//      }
       framePointer = 0;
-      blocksReceived = 0;
+      linesReceived = 0;
       framesReceived++;
-      if(stopSignal)
-      {
+      if(stopSignal) {
         i2sStop();
         stopSignal = false;
       }
     }
-    //    i2sStop();
 }
 
 void IRAM_ATTR I2SCamera::vSyncInterrupt(void* arg)
@@ -73,7 +119,7 @@ void I2SCamera::i2sRun()
 
     esp_intr_disable(i2sInterruptHandle);
     i2sConfReset();
-    blocksReceived = 0;
+    linesReceived = 0;
     dmaBufferActive = 0;
     framePointer = 0;
     //DEBUG_PRINT("Sample count ");
@@ -114,12 +160,13 @@ bool I2SCamera::init(const int XRES, const int YRES, const int VSYNC, const int 
   xres = XRES;
   yres = YRES;
   frameBytes = XRES * YRES * 2;
-  frame = (unsigned char*)malloc(frameBytes);
-  if(!frame)
-  {
-    DEBUG_PRINTLN("Not enough memory for frame buffer!");
-    return false;
-  }
+//  frame = (unsigned char*)malloc(frameBytes);
+//  if(!frame)
+//  {
+//    DEBUG_PRINTLN("Not enough memory for frame buffer!");
+//    return false;
+//  }
+  frameBuffer = xRingbufferCreate(frameBytes, RINGBUF_TYPE_BYTEBUF);
   i2sInit(VSYNC, HREF, PCLK, D0, D1, D2, D3, D4, D5, D6, D7);
   dmaBufferInit(xres * 2 * 2);  //two bytes per dword packing, two bytes per pixel
   initVSync(VSYNC);

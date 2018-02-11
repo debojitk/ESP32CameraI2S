@@ -2,7 +2,7 @@
 #include <esp_wifi.h>
 #include <lwip/err.h>
 #include <lwip/sockets.h>
-#include "BMP.h"
+//#include "BMP.h"
 #include "OV7670.h"
 #include "wifi_internal.h"
 
@@ -34,10 +34,14 @@ struct PacketHeader {
   uint32_t offset;
   uint32_t len;
 };
+struct VideoPacket {
+  PacketHeader header;
+  uint8_t data[MAX_DATA_SIZE];
+};
 
 OV7670 *camera;
 
-byte bmpHeader[BMP::headerSize];
+//byte bmpHeader[BMP::headerSize];
 int udp_server = -1;
 struct sockaddr_in destination;
 bool video_running = false;
@@ -63,7 +67,7 @@ void setup() {
   esp_wifi_set_config(WIFI_IF_AP, &conf);
   
   camera = new OV7670(OV7670::Mode::QQVGA_RGB565, SIOD, SIOC, VSYNC, HREF, XCLK, PCLK, D0, D1, D2, D3, D4, D5, D6, D7);
-  BMP::construct16BitHeader(bmpHeader, camera->xres, camera->yres);
+//  BMP::construct16BitHeader(bmpHeader, camera->xres, camera->yres);
 
   // Init socket
   udp_server = socket(AF_INET, SOCK_DGRAM, 0);
@@ -90,36 +94,71 @@ void loop() {
     return;
   }
 
-  camera->oneFrame();
+//  Serial.println("---Start frame");
+//  camera->oneFrame();
+//  Serial.println("---End frame");
+  camera->start();
+  camera->stopSignal = true;
 
-  static byte packet[MAX_PACKET_SIZE];
-  static uint8_t framenum = 0;
-  PacketHeader* header = (PacketHeader*)packet;
-  header->frame = framenum++;
-  header->len = camera->frameBytes;
-
-  for (int i = 0; i < camera->frameBytes; i += MAX_DATA_SIZE) {
-    bool end = i + MAX_DATA_SIZE > camera->frameBytes;
-    int len = end ? camera->frameBytes - i : MAX_DATA_SIZE;
-      header->offset = i;
-      memcpy(packet + sizeof(PacketHeader), camera->frame + i, len);
+  size_t dataSize = 0;
+  size_t frameProgress = 0;
+  VideoPacket pkt;
+  pkt.header.frame = camera->framesReceived;
+  pkt.header.len = camera->frameBytes;
+  while (frameProgress < camera->frameBytes) {
+    void* data = xRingbufferReceiveUpTo(camera->frameBuffer, &dataSize, 1, MAX_DATA_SIZE);
+//    Serial.print(xRingbufferGetCurFreeSize(camera->frameBuffer));
+//    Serial.print(' ');
+//    Serial.println(dataSize);
+    if (data == NULL) {
+//      Serial.println("NULL from rx");
+      if (camera->stopSignal) continue;
+      break;
+    }
+    pkt.header.offset = frameProgress;
+    memcpy(pkt.data, data, dataSize);
+    vRingbufferReturnItem(camera->frameBuffer, data);
     int sent = sendto(
       udp_server,
-      packet, sizeof(PacketHeader) + len,
+      &pkt, sizeof(PacketHeader) + dataSize,
       0,
       (struct sockaddr*) &destination, sizeof(destination)
     );
+    frameProgress += dataSize;
   }
 
+  // Wait for end of frame signal
+  while(camera->stopSignal);
+
+  
+
+//  static byte packet[MAX_PACKET_SIZE];
+//  static uint8_t framenum = 0;
+//  PacketHeader* header = (PacketHeader*)packet;
+//  header->frame = framenum++;
+//  header->len = camera->frameBytes;
+//
+//  for (int i = 0; i < camera->frameBytes; i += MAX_DATA_SIZE) {
+//    bool end = i + MAX_DATA_SIZE > camera->frameBytes;
+//    int len = end ? camera->frameBytes - i : MAX_DATA_SIZE;
+//    header->offset = i;
+//    memcpy(packet + sizeof(PacketHeader), camera->frame + i, len);
+//    int sent = sendto(
+//      udp_server,
+//      packet, sizeof(PacketHeader) + len,
+//      0,
+//      (struct sockaddr*) &destination, sizeof(destination)
+//    );
+//  }
+
   // FPS counter
-  static unsigned int frames = 0;
+  static unsigned int lastFrames = 0;
   static unsigned long last = millis();
-  ++frames;
   unsigned long now = millis();
   if (now - last > 1000) {
-    Serial.println(frames);
+    Serial.println(camera->framesReceived - lastFrames);
     last = now;
-    frames = 0;
+    lastFrames = camera->framesReceived;
   }
 }
 
